@@ -1,10 +1,7 @@
 import pandas as pd
-from hazm import Normalizer, word_tokenize
+# from hazm import Normalizer, word_tokenize
 import numpy as np
 from timeit import default_timer as timer
-
-
-keys = pd.read_excel("structure.xlsx")
 
 forms = ['فروش', 'خرید', 'دریافت', 'پرداخت', 'تسویه', 'انتقال وجه', 'واریز', 'تنخواه']
 scales_value = ['هزار', 'میلیون', 'میلیارد']
@@ -12,262 +9,202 @@ units_value = ['ریال', 'تومان']
 
 
 def extract_form(sentence):
+    global form_index
+    form = None
     # Normalize the sentence
-    normalizer = Normalizer()
-    normalized_sentence = normalizer.normalize(sentence)
+    #     normalizer = Normalizer()
+    #     normalized_sentence = normalizer.normalize(sentence)
 
     # Tokenize the normalized sentence
-    tokens = word_tokenize(normalized_sentence)
-
-    # Extract key information
-    form = None
+    tokens = sentence.split(" ")
 
     for i, token in enumerate(tokens):
-
         if token in forms:
             form = "".join(tokens[i])
             form_index = i
+            break
 
-        if token == 'انتقال':
+        elif token == 'انتقال':
             form = 'انتقال وجه'
             form_index = i
 
-        if token == 'تنخواه':
-            form = "تنخواه هما"
-            form_index = i
-
     if form is None:
-        print("Form isnt available  in sentence")
-        return "form unreachable"
+        form = "form_unreachable"
+        form_index = 0
 
     return form, form_index, tokens
 
 
-def get_form_and_result(sentence=None):
-    if sentence == None:
-        sentence = input("درخواست خود را وارد کنید: ")
+def get_sentence():
+    sentence = input("لطفا درخواست خود را وارد کنید: ")
+    return sentence
+
+
+def find_key_words(sentence=None):
+    print(f"جمله وارد شده: {sentence}")
+    if sentence is None:
+        sentence = get_sentence()
+    value = special = scale_value = unit_value = person1 = person2 = total_value = scale_value = unit_value = None
+    b_index_value = None
+    b_index_person = None
     form, form_index, tokens = extract_form(sentence)
 
-    # extract variables for Sale
-    if form == 'فروش':
-        item, value, value_scale, value_unit, person, special = None, None, None, None, None, None
+    while form == 'form_unreachable':
+        print("درخواست وارد شده معتبر نمیباشد")
+        sentence = input("لطفا درخواست خود را وارد کنید: ")
+        form, form_index, tokens = extract_form(sentence)
 
-        b_index_person = None
-        b_index_value = None
+    # FIND B_INDEXES
+    for i, token in enumerate(tokens):
+        if token == 'به' and tokens[i + 1] != 'مبلغ':
+            b_index_person = i
 
-        for i, token in enumerate(tokens):
-            if token == 'به' and tokens[i + 1] != 'مبلغ':
-                b_index_person = i
+        elif token == 'به' and tokens[i + 1] == 'مبلغ':
+            b_index_value = i
 
-            elif token == 'به' and tokens[i + 1] == 'مبلغ':
-                b_index_value = i
+    # FIND AZ
+    try:
+        idx_az = tokens.index('از')
+    except ValueError:
+        idx_az = None
 
-        for i, token in enumerate(tokens):
+    # FIND ITEM IN SENTENCE
+    if idx_az is not None and b_index_person is not None:
+        item = " ".join(tokens[form_index + 1:min(b_index_person, b_index_value, idx_az)])
+    elif idx_az is None and b_index_person is not None:
+        item = " ".join(tokens[form_index + 1:min(b_index_person, b_index_value)])
+    else:
+        item = " ".join(tokens[form_index + 1:b_index_value])
 
-            if form_index - 1 >= 0:
-                special = " ".join(tokens[0:form_index])
-
-            # find item based on index of form until lowest 'be' index
-            item = " ".join(tokens[form_index + 1:min(b_index_person, b_index_value)])
-
-            # find value, scale, unit based on digit or not
-            if token.isdigit() and i + 1 < len(tokens):
-                value, scale_value, unit_value = f"{token}", f"{tokens[i + 1]}", f"{tokens[i + 2]}"
-
-            if b_index_person > b_index_value:
-                person = ' '.join(tokens[b_index_person:])
+    # FIND PERSON 1, DIGITS, SPECIAL, PERSON 2
+    for i, token in enumerate(tokens):
+        if tokens[i] == 'از' and b_index_person is None and idx_az is not None and idx_az > b_index_value:
+            person1 = " ".join(tokens[i:])
+        elif tokens[i] == 'از' and b_index_person is None and idx_az is not None and idx_az < b_index_value:
+            person1 = " ".join(tokens[i:b_index_value])
+        elif tokens[i] == 'از' and i > b_index_person:
+            person1 = " ".join(tokens[i:])
+        elif tokens[i] == 'از' and i < b_index_person and i < b_index_value:
+            if b_index_person < b_index_value:
+                person1 = " ".join(tokens[i:b_index_person])
             else:
-                person = ' '.join(tokens[b_index_person:b_index_value])
+                person1 = " ".join(tokens[i:b_index_value])
+        elif tokens[i] == 'از' and b_index_person > i > b_index_value:
+            person1 = " ".join(tokens[i:b_index_person])
+        elif 'از' not in tokens:
+            person1 = ''
 
-        if special is None:
-            special = ''
+        # find value, scale, unit based on digit or not
+        if token.isdigit() and i + 1 < len(tokens):
+            value = f"{token}"
 
-        return f"form: {special + ' ' + form} | item: {item} | value: {value} | scale value: {scale_value} | unit value: {unit_value} | person: {person}"
+        if form_index - 1 >= 0:
+            special = " ".join(tokens[0:form_index])
+        else:
+            special = ""
+
+        # FIND PERSON 2
+        if idx_az is not None:
+            if b_index_person is not None and b_index_person > b_index_value and b_index_person > idx_az:
+                person2 = ' '.join(tokens[b_index_person:])
+            elif b_index_person is not None and b_index_value < b_index_person < idx_az:
+                person2 = ' '.join(tokens[b_index_person:idx_az])
+            elif b_index_person is not None and b_index_person < b_index_value:
+                person2 = ' '.join(tokens[b_index_person:b_index_value])
+            else:
+                person2 = ''
+        else:
+            if b_index_person is not None and b_index_person > b_index_value:
+                person2 = ' '.join(tokens[b_index_person:])
+            elif b_index_person is not None and b_index_person < b_index_value:
+                person2 = ' '.join(tokens[b_index_person:b_index_value])
+            else:
+                person2 = ''
+
+    # FIND SCALE VALUE AND UNIT VALUE
+    for tok in tokens:
+        if tok in scales_value:
+            scale_value = tok
+        elif tok in units_value:
+            unit_value = tok
+
+    if value is None:
+        print("مبلغ تراکنش وارد نشده است")
+        special, form, item, value, scale_value, unit_value, person1, person2 = find_key_words()
+    elif scale_value is None:
+        print("مبنای مبلغ وارد شده صحیح نمیباشد(صد، هزار، میلیون، میلیارد)")
+        special, form, item, value, scale_value, unit_value, person1, person2 = find_key_words()
+    elif unit_value is None:
+        print("واحد پولی وارد شده صحیح نمیباشد(ریال، تومان)")
+        special, form, item, value, scale_value, unit_value, person1, person2 = find_key_words()
+
+    return special, form, item, value, scale_value, unit_value, person1, person2
+
+
+def return_keywords(special, form, item, value, scale_value, unit_value, person1, person2):
+    if form == 'فروش':
+        while person2 == '':
+            print("مشخص نشد به چه شخصی یا به چه کسی باید فروش برسد")
+            sentence = get_sentence()
+            special, form, item, value, scale_value, unit_value, person1, person2 = find_key_words(sentence)
+
+        return f"form: {special + ' ' + form} | item: {item} | value: {value} | scale value: {scale_value} | unit value: {unit_value} | person1: {person1} | person2: {person2}"
 
     # extract variables for buy
     if form == 'خرید':
-        item, value, value_scale, value_unit, person, special = None, None, None, None, None, None
+        if len(special) > 2:
+            while person2 == '':
+                print(f"مشخص نشد به چه شخصی یا به چه کسی باید {special + ' ' + form} انجام شود")
+                sentence = get_sentence()
+                special, form, item, value, scale_value, unit_value, person1, person2 = find_key_words(sentence)
+        else:
+            while person1 == '':
+                print("مشخص نشد خرید باید از چه شخصی یا از چه جایی انجام شود")
+                sentence = get_sentence()
+                special, form, item, value, scale_value, unit_value, person1, person2 = find_key_words(sentence)
 
-        b_index_value = None
-        b_index_person = None
-
-        for i, token in enumerate(tokens):
-            if token == 'به' and tokens[i + 1] != 'مبلغ':
-                b_index_person = i
-
-            elif token == 'به' and tokens[i + 1] == 'مبلغ':
-                b_index_value = i
-
-        for i, token in enumerate(tokens):
-
-            if form_index - 1 >= 0:
-                special = " ".join(tokens[0:form_index])
-
-            # find item based on index of form until lowest 'be' index
-            if b_index_person is not None:
-                item = " ".join(tokens[form_index + 1:min(b_index_person, b_index_value)])
-            else:
-                item = " ".join(tokens[form_index + 1:b_index_value])
-
-            # find value, scale, unit based on digit or not
-            if token.isdigit() and i + 1 < len(tokens):
-                value, scale_value, unit_value = f"{token}", f"{tokens[i + 1]}", f"{tokens[i + 2]}"
-
-            if b_index_person == None:
-                if token == 'از':
-                    person = " ".join(tokens[i:])
-
-            elif b_index_person > b_index_value:
-                person = ' '.join(tokens[b_index_person:])
-            else:
-                person = ' '.join(tokens[b_index_person:b_index_value])
-
-        if special is None:
-            special = ''
-
-        return f"form: {special + ' ' + form} | item: {item} | value: {value} | scale value: {scale_value} | unit value: {unit_value} | person: {person}"
+        return f"form: {special + ' ' + form} | item: {item} | value: {value} | scale value: {scale_value} | unit value: {unit_value} | person1: {person1} | person2: {person2}"
 
         # extract variables for recieve
     if form == 'دریافت':
-        item, value, value_scale, value_unit, person1, person2 = None, None, None, None, None, None
-
-        b_index_value = None
-        b_index_person = None
-
-        for i, token in enumerate(tokens):
-            if token == 'به' and tokens[i + 1] != 'مبلغ':
-                b_index_person = i
-
-            elif token == 'به' and tokens[i + 1] == 'مبلغ':
-                b_index_value = i
-
-        for i, token in enumerate(tokens):
-            # find item based on index of form until lowest 'be' index
-            if b_index_person is not None:
-                item = " ".join(tokens[form_index + 1:min(b_index_person, b_index_value)])
-            else:
-                item = " ".join(tokens[form_index + 1:b_index_value])
-
-            # find value, scale, unit based on digit or not
-            if token.isdigit() and i + 1 < len(tokens):
-                value, scale_value, unit_value = f"{token}", f"{tokens[i + 1]}", f"{tokens[i + 2]}"
-
-            if token == 'از':
-                person2 = " ".join(tokens[i:b_index_person])
-            elif b_index_person > b_index_value:
-                person1 = ' '.join(tokens[b_index_person:])
-            else:
-                person1 = ' '.join(tokens[b_index_person:b_index_value])
-
+        while person1 == '':
+            print("مشخص نشد دریافت باید از چه شخصی یا از چه جایی انجام شود")
+            sentence = get_sentence()
+            special, form, item, value, scale_value, unit_value, person1, person2 = find_key_words(sentence)
         return f"form: {form} | item: {item} | value: {value} | scale value:{scale_value} | unit value: {unit_value} | person1: {person1} | person2: {person2}"
 
     # Extract variables for payment
     if form == 'پرداخت':
-        item, value, value_scale, value_unit, person = None, None, None, None, None
+        while person2 == '':
+            print("مشخص نشد پرداخت باید به چه شخصی یا به چه جایی انجام شود")
+            sentence = get_sentence()
+            special, form, item, value, scale_value, unit_value, person1, person2 = find_key_words(sentence)
+        return f"form: {form} | item: {item} | value: {value} | scale value: {scale_value} | unit_value: {unit_value} | person1: {person1} | person2: {person2}"
 
-        b_index_person = None
-        b_index_value = None
-
-        for i, token in enumerate(tokens):
-            if token == 'به' and tokens[i + 1] != 'مبلغ':
-                b_index_person = i
-
-            elif token == 'به' and tokens[i + 1] == 'مبلغ':
-                b_index_value = i
-
-        for i, token in enumerate(tokens):
-
-            # find item based on index of form until lowest 'be' index
-            item = " ".join(tokens[form_index + 1:min(b_index_person, b_index_value)])
-
-            # find value, scale, unit based on digit or not
-            if token.isdigit() and i + 1 < len(tokens):
-                value, scale_value, unit_value = f"{token}", f"{tokens[i + 1]}", f"{tokens[i + 2]}"
-
-            if b_index_person > b_index_value:
-                person = ' '.join(tokens[b_index_person:])
-            else:
-                person = ' '.join(tokens[b_index_person:b_index_value])
-
-        return f"form: {form} | item: {item} | value: {value} | scale value: {scale_value} | unit_value: {unit_value} | person: {person}"
-
-    if form == 'تنخواه هما':
-        item, value, value_scale, value_unit, person, special = None, None, None, None, None, None
-
-        b_index_value = None
-        b_index_person = None
-
-        for i, token in enumerate(tokens):
-            if token == 'به' and tokens[i + 1] != 'مبلغ':
-                b_index_person = i
-
-            elif token == 'به' and tokens[i + 1] == 'مبلغ':
-                b_index_value = i
-
-        for i, token in enumerate(tokens):
-            # find item based on index of form until lowest 'be' index
-            if b_index_person is not None:
-                item = " ".join(tokens[form_index + 2:min(b_index_person, b_index_value)])
-            else:
-                item = " ".join(tokens[form_index + 2:b_index_value])
-
-            # find value, scale, unit based on digit or not
-            if token.isdigit() and i + 1 < len(tokens):
-                value, scale_value, unit_value = f"{token}", f"{tokens[i + 1]}", f"{tokens[i + 2]}"
-
-            # find person
-            if b_index_person == None:
-                person = ""
-            elif b_index_person > b_index_value:
-                person = ' '.join(tokens[b_index_person:])
-            else:
-                person = ' '.join(tokens[b_index_person:b_index_value])
-
-            # find person2
-            if token == 'از':
-                person2 = " ".join(tokens[i:])
-
-            # find special
-            if form_index - 1 >= 0:
-                special = " ".join(tokens[0:form_index])
-
-        return f"form: {special + ' ' + form} | item: {item} | value: {value} | scale value:{scale_value} | unit value: {unit_value} | person: {person} | person2: {person2}"
+    if form == 'تنخواه':
+        return f"form: {special + ' ' + form} | item: {item} | value: {value} | scale value:{scale_value} | unit value: {unit_value} | person1: {person1} | person2: {person2}"
 
     # extract values from tankhah
     if form == 'انتقال وجه':
-        value, value_scale, value_unit, person1, person2 = None, None, None, None, None
+        if 'وجه' in item:
+            item = item.replace('وجه', '')
 
-        b_index_person = None
-        b_index_value = None
+        while person1 == '':
+            print("مشخص نشد انتقال وجه باید از چه شخصی یا از چه جایی منتقل شود")
+            sentence = get_sentence()
+            special, form, item, value, scale_value, unit_value, person1, person2 = find_key_words(sentence)
+        while person2 == '':
+            print("مشخص نشد انتقال وجه باید به چه شخصی یا به چه منبعی منتقل شود")
+            sentence = get_sentence()
+            special, form, item, value, scale_value, unit_value, person1, person2 = find_key_words(sentence)
 
-        for i, token in enumerate(tokens):
-            if token == 'به' and tokens[i + 1] != 'مبلغ':
-                b_index_person = i
+        return f"form: {form} | item: {item} | value: {value} | scale_value: {scale_value} | unit_value: {unit_value} | person1: {person1} | person2:{person2}"
 
-            elif token == 'به' and tokens[i + 1] == 'مبلغ':
-                b_index_value = i
-
-        for i, token in enumerate(tokens):
-            if token == 'از':
-                person1 = " ".join(tokens[i:b_index_person])
-
-            if b_index_person > b_index_value:
-                person2 = ' '.join(tokens[b_index_person:])
-            else:
-                person2 = ' '.join(tokens[b_index_person:b_index_value])
-
-            # find value, scale, unit based on digit or not
-            if token.isdigit() and i + 1 < len(tokens):
-                value, scale_value, unit_value = f"{token}", f"{tokens[i + 1]}", f"{tokens[i + 2]}"
-
-        return f"form: {form} | value: {value} | scale_value: {scale_value} | unit_value: {unit_value} | person1: {person1} | person2:{person2}"
-
-
-sentence = "مالیات و عوارض فروش کالاهای مشمول مالیات به مبلغ 69750 هزار تومان به محمد"
 
 s_time = timer()
-result = get_form_and_result(sentence)
+sentence = "انتقال وجه از صندوق مرکزی به صندوق فروشگاه به مبلغ  45 هزار ریال"
+key_words = find_key_words(sentence)
+result = return_keywords(*key_words)
 e_time = timer()
 print(result)
-print(f"{(e_time - s_time):.3f} Seconds")
-
+print(f"{(e_time - s_time):.7f} Seconds")
